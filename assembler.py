@@ -1,4 +1,4 @@
-class Assambler:
+class Assembler:
     def __init__(self) -> None:
         self.opcode = {}
         self.instruction = []
@@ -38,7 +38,7 @@ class Assambler:
         pass
 
 if __name__ == "__main__":
-    asm = Assambler()
+    asm = Assembler()
     asm.read_file("test.asm")
     for instruction in asm.instruction:
         print(instruction)
