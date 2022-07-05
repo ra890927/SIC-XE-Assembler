@@ -1,7 +1,5 @@
-from ast import arg
-import opcode
-from statistics import mode
 import sys
+import json
 from getopt import getopt
 
 class Assembler:
@@ -25,9 +23,10 @@ class Assembler:
             'EQU',
         ]
 
-        self.__extdef_table = []
-        self.__extref_table = []
+        self.__extdef_table = {}
+        self.__extref_table = {}
         self.__symbol_table = {}
+        self.__modified_record = {}
         self.__literal_table = []
 
         self.__init_opcode()
@@ -202,10 +201,11 @@ class Assembler:
 
         return True
     # pass one
-    def pass_one(self) -> None:
+    def pass_one(self) -> bool:
         cur_block = None        # record current program block
         cur_location = None     # record memory location
         cur_symbol_table = {}   # record current symbol table
+        cur_extref_table = []   # record current extref table
 
         for index, instr in enumerate(self.instruction):
             # add literal
@@ -217,15 +217,20 @@ class Assembler:
             if instr['mnemonic'] == 'START':
                 cur_block = instr['symbol']     # update current program block
                 cur_symbol_table.clear()        # reset symbol table
+                cur_extref_table.clear()        # reset extref table
                 self.__literal_table.clear()    # reset literal table
+                self.__extdef_table.clear()     # reset extdef table
+                self.__extref_table.clear()     # reset extref table
                 cur_location = 0                # for relocation program, start with 0
                 instr['location'] = cur_location
+                self.__extdef_table[cur_block] = {}     # init dict
             # add extdef symbol
             elif instr['mnemonic'] == 'EXTDEF':
-                self.__extdef_table += instr['operand']
+                for ext_def in instr['operand']:
+                    self.__extdef_table[cur_block][ext_def] = None
             # add extref symbol
             elif instr['mnemonic'] == 'EXTREF':
-                self.__extref_table += instr['operand']
+                cur_extref_table += instr['operand']
             # declare variable
             elif instr['mnemonic'] == 'RESW':
                 instr['location'] = cur_location
@@ -250,11 +255,14 @@ class Assembler:
                         cur_location += len(list(literal[3:].split('\''))[0])
                     elif literal[1] == 'X':
                         cur_location += len(list(literal[3:].split('\''))[0]) // 2
+                self.__literal_table.clear()
                 # update symbol table
                 if instr['mnemonic'] == 'END':
                     # [notice]: must use copy before reset
                     self.__symbol_table[cur_block] = cur_symbol_table.copy()
+                    self.__extref_table[cur_block] = cur_extref_table.copy()
                     cur_symbol_table.clear()
+                    cur_extref_table.clear()
                     self.__literal_table.clear()
             # define memory position
             elif instr['mnemonic'] == 'EQU':
@@ -266,8 +274,12 @@ class Assembler:
                 instr['location'] = cur_location
                 # [notice]: must use copy before reset
                 self.__symbol_table[cur_block] = cur_symbol_table.copy()
+                self.__extref_table[cur_block] = cur_extref_table.copy()
                 cur_block = instr['symbol']
+                self.__extdef_table[cur_block] = {}
+                self.__extref_table[cur_block] = []
                 cur_symbol_table.clear()
+                cur_extref_table.clear()
             # const variable
             elif instr['mnemonic'] == 'BYTE':
                 instr['location'] = cur_location
@@ -301,6 +313,7 @@ class Assembler:
                     # format 3
                     else:
                         cur_location += 3
+            
             # calculate EQU with symbol
             if instr['mnemonic'] == 'EQU':
                 # add literal in symbol table
@@ -319,10 +332,20 @@ class Assembler:
             # add other symbol in symbol table
             elif 'symbol' in instr and instr['symbol'] != '*':
                 cur_symbol_table[instr['symbol']] = instr['location']
+
+            if 'symbol' in instr:
+                if instr['symbol'] in self.__extdef_table[cur_block]:
+                    self.__extdef_table[cur_block][instr['symbol']] = instr['location']
+
+        print(json.dumps(self.__extdef_table, indent = 4))
+        print(json.dumps(self.__extref_table, indent = 4))
+        return True
+            
     # pass two
-    def pass_two(self) -> None:
-        b_loc = None        # rocord register BASE
-        cur_block = None    # specify current program block
+    def pass_two(self) -> bool:
+        b_loc = None            # rocord register BASE
+        cur_block = None        # specify current program block
+        cur_modified_list = []  # record current program block M records
         # these has processed in pass one, skip
         skip_instr = ['EXTDEF', 'EXTREF', 'RESW', 'RESB', 'LTORG', 'EQU', 'END']
         for index, instr in enumerate(self.instruction):
@@ -331,7 +354,14 @@ class Assembler:
             # update program block
             elif instr['mnemonic'] == 'START':
                 cur_block = instr['symbol']
+                cur_modified_list = []
+            elif instr['mnemonic'] == 'END':
+                self.__modified_record[cur_block] = cur_modified_list.copy()
+                cur_modified_list.clear()
             elif instr['mnemonic'] == 'CSECT':
+                # update program block M records
+                self.__modified_record[cur_block] = cur_modified_list.copy()
+                cur_modified_list.clear()
                 cur_block = instr['symbol']
             # update B register content
             elif instr['mnemonic'] == 'BASE':
@@ -354,8 +384,20 @@ class Assembler:
                     symbol_1, symbol_2 = instr['operand'].split('-')
                     location_1 = self.__symbol_table[cur_block][symbol_1] \
                         if symbol_1 in self.__symbol_table[cur_block] else 0
+                    if location_1 == 0:
+                        cur_modified_list.append({
+                            'location': instr['location'],
+                            'byte': 6,
+                            'offset': '+' + symbol_1,
+                        })
                     location_2 = self.__symbol_table[cur_block][symbol_2] \
                         if symbol_2 in self.__symbol_table[cur_block] else 0
+                    if location_2 == 0:
+                        cur_modified_list.append({
+                            'location': instr['location'],
+                            'byte': 6,
+                            'offset': '-' + symbol_2,
+                        })
                     instr['opcode'] = [
                         ((location_1 - location_2) & (0xff << i)) >> i
                         for i in range(16, -1, -8)
@@ -364,8 +406,20 @@ class Assembler:
                     symbol_1, symbol_2 = instr['operand'].split('+')
                     location_1 = self.__symbol_table[cur_block][symbol_1] \
                         if symbol_1 in self.__symbol_table[cur_block] else 0
+                    if location_1 == 0:
+                        cur_modified_list.append({
+                            'location': instr['location'],
+                            'byte': 6,
+                            'offset': '+' + symbol_1,
+                        })
                     location_2 = self.__symbol_table[cur_block][symbol_2] \
                         if symbol_2 in self.__symbol_table[cur_block] else 0
+                    if location_2 == 0:
+                        cur_modified_list.append({
+                            'location': instr['location'],
+                            'byte': 6,
+                            'offset': '+' + symbol_2,
+                        })
                     instr['opcode'] = [
                         ((location_1 + location_2) & (0xff << i)) >> i
                         for i in range(16, -1, -8)
@@ -489,6 +543,11 @@ class Assembler:
                             if symbol_loc == None:
                                 # by default, EXTREF memory reference is 0
                                 instr['opcode'] = self.__gen_code_list(mnemonic, 3, format_num, 0)
+                                cur_modified_list.append({
+                                    'location': instr['location'] + 1,
+                                    'byte': 5,
+                                    'offset': '+' + first_element,
+                                })
                             else:
                                 instr['opcode'] = self.__gen_code_list(mnemonic, 3, format_num, symbol_loc)
                         else:
@@ -515,33 +574,145 @@ class Assembler:
                                     format_num |= 4
                                     offset = symbol_loc - b_loc
                                     instr['opcode'] = self.__gen_code_list(instr['mnemonic'], 3, format_num, offset)
+    
+        print(json.dumps(self.__modified_record, indent = 4))
+        return True
+    
+    # write file
+    def write_file(self, file_name) -> bool:
+        # record program block length and start position
+        cur_block = {}
+        cur_opcode_list = []
+        cur_position_list = []
+        cur_block_bytes = 0
+        program_info = {}
+        end_position = 0
 
-    def write_file(self, file_name) -> None:
-        with open(file_name, mode='w') as f:
-            for instr in self.instruction:
+        for instr in self.instruction:
+            if instr['mnemonic'] == 'START':
+                cur_opcode_list.clear()
+                cur_position_list.clear()
+                cur_block = {
+                    'name': instr['symbol'],
+                    'length': 0,
+                    'start': instr['location'],
+                }
+            elif instr['mnemonic'] == 'CSECT':
+                name = cur_block['name']
+                del cur_block['name']
+                program_info[name] = cur_block
+                program_info[name]['opcode'] = {}
+                for index, pos in enumerate(cur_position_list):
+                    program_info[name]['opcode'][pos] = cur_opcode_list[index]
+                cur_opcode_list.clear()
+                cur_position_list.clear()
+                cur_block = {
+                    'name': instr['symbol'],
+                    'length': 0,
+                    'start': instr['location'],
+                }
+                # print(json.dumps(program_info, indent = 4))
+            # elif instr['mnemonic'] == 'RSUB':
+                
+            elif instr['mnemonic'] == 'END':
+                for block in self.__symbol_table.keys():
+                    if instr['operand'] in self.__symbol_table[block]:
+                        end_position = self.__symbol_table[block][instr['operand']]
+            elif 'location' in instr:
+                length = instr['location']
                 if 'opcode' in instr:
-                    opcode_str = ''
-                    for opc in instr['opcode']:
-                        opcode_str += '{:02X}'.format(opc)
-                    f.write(opcode_str + '\n')
+                    length += len(instr['opcode'])
+                cur_block['length'] = max(cur_block['length'], length)
 
+            if 'opcode' in instr:
+                opcode_str = ''
+                for opc in instr['opcode']:
+                    opcode_str += '{:02X}'.format(opc)
+                instr['opcode'] = opcode_str
+
+                if len(cur_opcode_list):
+                    if len(cur_opcode_list[-1]) + len(opcode_str) // 2 > 60:
+                        cur_position_list.append(instr['location'])
+                        cur_opcode_list.append(opcode_str)
+                    else:
+                        cur_opcode_list[-1] += opcode_str
+                else:
+                    cur_position_list.append(instr['location'])
+                    cur_opcode_list.append(opcode_str)
+
+        name = cur_block['name']
+        del cur_block['name']
+        program_info[name] = cur_block
+        program_info[name]['opcode'] = {}
+        for index, pos in enumerate(cur_position_list):
+            program_info[name]['opcode'][pos] = cur_opcode_list[index]
+        
+        with open('./program_info.json', mode='a+') as f:
+            f.write(json.dumps(program_info, indent=4))
+
+        with open(file_name, mode = 'w') as f:
+            for instr in self.instruction:
+                if instr['mnemonic'] == 'START':
+                    symbol = instr['symbol']
+                    f.write('H{:<6s}{:06X}{:06X}\n'.format(
+                        symbol,
+                        program_info[symbol]['start'],
+                        program_info[symbol]['length'],
+                    ))
+                elif instr['mnemonic'] == 'CSECT':
+                    pass
+
+        return True
+
+OPTION_CONFIG = ['-o', '-a']
 
 if __name__ == "__main__":
     # initial class
     asm = Assembler()
     # get options
-    opts, args = getopt(sys.argv[1:], 'o:')
+    sorted_opt = []
+    temp_opt = None
+    # sort and classify option
+    for opt in sys.argv[1:]:
+        if temp_opt != None:
+            sorted_opt = [temp_opt, opt] + sorted_opt
+            temp_opt = None
+        elif opt in OPTION_CONFIG:
+            temp_opt = opt
+        else:
+            sorted_opt.append(opt)
+
+    opts, args = getopt(sorted_opt, 'a:o:')
+    
     # default set the output file is output.txt
     file_name = 'output.txt'
     try:
         file_name = [arg for opt, arg in opts if opt == '-o'][0]
     except:
         file_name = 'output.txt'
+    
     # read and parse file
-    asm.read_file(args[0])
-    # pass one
-    asm.pass_one()
-    # pass two
-    asm.pass_two()
-    # write file
-    asm.write_file(file_name)
+    if asm.read_file(args[0]):
+        # pass one
+        if asm.pass_one():
+            # pass two
+            if asm.pass_two():
+                with open('./program_info.json', mode='w+') as f:
+                    f.write(json.dumps(asm.instruction, indent=4))
+                    f.write('\n')
+                # for instr in asm.instruction:
+                #     print(json.dumps(instr, indent = 4))
+                # write file
+                if asm.write_file(file_name):
+                    print('assemble complete')
+                else:
+                    print('write file error')
+            else:
+                print('pass two error')
+        else:
+            print('pass one error')
+    else:
+        print('read file error')
+
+    # for instr in asm.instruction:
+    #     print(json.dumps(instr, indent = 4))
