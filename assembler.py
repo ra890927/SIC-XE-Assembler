@@ -1,5 +1,4 @@
 import sys
-import json
 from getopt import getopt
 
 class Assembler:
@@ -31,21 +30,18 @@ class Assembler:
 
         self.__init_opcode()
         self.__get_format_list()
+    
     # get opcode list
     def __get_format_list(self) -> None:
         self.__opcode_list = self.__opcode.keys()
+    
     # check mnemonic
     def __check_mnemonic(self, mneonic) -> bool:
         if mneonic[0] == '+':
             return mneonic[1:] in self.__opcode_list
         else:
             return mneonic in self.__opcode_list or mneonic in self.__directive_list
-    # check opcode
-    def __check_opcode(self, opcode) -> bool:
-        return opcode in self.__opcode_list
-    # check directive
-    def __check_directive(self, directive) -> bool:
-        return directive in self.__directive_list
+
     # get opcode list
     def __init_opcode(self) -> None:
         with open("config/opcode", mode="r") as f:
@@ -55,6 +51,7 @@ class Assembler:
                     "format": opcode_arr[1].split('/'),
                     "code": int(opcode_arr[2].replace("\n", ""), base=16)
                 }
+    
     # generate code list
     def __gen_code_list(self, opcode, type, format, offset) -> list:
         # format 4
@@ -72,8 +69,9 @@ class Assembler:
                 format << 4 | ((offset & 0xf00) >> 8),
                 offset & 0xff,
             ]
+    
     # read file
-    def read_file(self, file_name) -> bool:
+    def read_file(self, file_name) -> None:
         format1_list = ['FIX', 'FLOAT', 'HIO', 'NORM', 'SIO', 'TIO', 'CSECT', 'LTORG']
         format2_list = ['ADDR', 'COMPR', 'DIVR', 'MULR', 'RMO' 'SHIFTL', 'SHIFTR']
 
@@ -92,8 +90,7 @@ class Assembler:
                 # special process EXTDEF
                 if 'EXTDEF' in instruction_arr:
                     if instruction_arr.index('EXTDEF') != 0:
-                        print(f'Syntax Error, line {index + 1}: "EXTDEF" can not have symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: "EXTDEF can not have symbol"')
                     
                     instruct_set = {
                         'mnemonic': instruction_arr[0],
@@ -102,8 +99,7 @@ class Assembler:
                 # special process EXTREF
                 elif 'EXTREF' in instruction_arr:
                     if instruction_arr.index('EXTREF') != 0:
-                        print(f'Syntax Error, line {index + 1}: "EXTREF" can not have symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: "EXTREF can not have symbol"')
                     
                     instruct_set = {
                         'mnemonic': instruction_arr[0],
@@ -118,8 +114,7 @@ class Assembler:
                             'operand': instruction_arr[2:],
                         }
                     else:
-                        print(f'Syntax Error, line {index + 1}: nonexistent symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: nonexistent symbol')
                 # process length = 3
                 elif len(instruction_arr) == 3:
                     for mnemonic in format2_list:
@@ -131,8 +126,7 @@ class Assembler:
                                 }
                                 break
                             else:
-                                print(f'Syntax Error, line {index + 1}: format error')
-                                return False
+                                raise SyntaxError(f'line {index + 1}: format error')
                     # instruct has set and continue
                     if len(instruct_set):
                         self.instruction.append(instruct_set)
@@ -157,8 +151,7 @@ class Assembler:
                             'operand': instruction_arr[2],
                         }
                     else:
-                        print(f'Syntax Error, line {index + 1}: nonexistent symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: nonexistent symbol')
                 # proces length = 2
                 elif len(instruction_arr) == 2:
                     for mnemonic in format1_list:
@@ -170,38 +163,33 @@ class Assembler:
                                 }
                                 break
                             else:
-                                print(f'Syntax Error, line {index + 1}: format error')
-                                return False
+                                raise SyntaxError(f'line {index + 1}: format error')
                     # instruct has set and continue
                     if len(instruct_set):
                         self.instruction.append(instruct_set)
                         continue
                     
                     if instruction_arr[0] == 'EQU':
-                        print(f'Syntax Error, line {index + 1}: EQU must have symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: EQU must have symbol')
                     elif self.__check_mnemonic(instruction_arr[0]):
                         instruct_set = {
                             'mnemonic': instruction_arr[0],
                             'operand': instruction_arr[1],
                         }
                     else:
-                        print(f'Syntax Error, line {index + 1}: nonexistent symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: nonexistent symbol')
                 else:
                     if self.__check_mnemonic(instruction_arr[0]):
                         instruct_set = {
                             'mnemonic': instruction_arr[0],
                         }
                     else:
-                        print(f'Syntax Error, line {index + 1}: nonexistent symbol')
-                        return False
+                        raise SyntaxError(f'line {index + 1}: nonexistent symbol')
 
                 self.instruction.append(instruct_set)
-
-        return True
+    
     # pass one
-    def pass_one(self) -> bool:
+    def pass_one(self) -> None:
         cur_block = None        # record current program block
         cur_location = None     # record memory location
         cur_symbol_table = {}   # record current symbol table
@@ -336,18 +324,14 @@ class Assembler:
             if 'symbol' in instr:
                 if instr['symbol'] in self.__extdef_table[cur_block]:
                     self.__extdef_table[cur_block][instr['symbol']] = instr['location']
-
-        print(json.dumps(self.__extdef_table, indent = 4))
-        print(json.dumps(self.__extref_table, indent = 4))
-        return True
             
     # pass two
-    def pass_two(self) -> bool:
+    def pass_two(self) -> None:
         b_loc = None            # rocord register BASE
         cur_block = None        # specify current program block
         cur_modified_list = []  # record current program block M records
         # these has processed in pass one, skip
-        skip_instr = ['EXTDEF', 'EXTREF', 'RESW', 'RESB', 'LTORG', 'EQU', 'END']
+        skip_instr = ['EXTDEF', 'EXTREF', 'RESW', 'RESB', 'LTORG', 'EQU']
         for index, instr in enumerate(self.instruction):
             if instr['mnemonic'] in skip_instr:
                 continue
@@ -505,8 +489,7 @@ class Assembler:
                             if symbol in self.__symbol_table[cur_block] else None
                         # symbol not defined
                         if symbol_loc == None:
-                            print(f'Syntax Error, line {index + 1}: symbol not defined')
-                            return False
+                            raise SyntaxError(f'line {index + 1}: symbol has not been defined')
                         else:
                             # calculate offset
                             offset = symbol_loc - instr['location'] - 3
@@ -574,56 +557,101 @@ class Assembler:
                                     format_num |= 4
                                     offset = symbol_loc - b_loc
                                     instr['opcode'] = self.__gen_code_list(instr['mnemonic'], 3, format_num, offset)
-    
-        print(json.dumps(self.__modified_record, indent = 4))
-        return True
-    
+        
     # write file
-    def write_file(self, file_name) -> bool:
+    def write_file(self, file_name) -> None:
         # record program block length and start position
         cur_block = {}
         cur_opcode_list = []
         cur_position_list = []
-        cur_block_bytes = 0
         program_info = {}
-        end_position = 0
+        end_position = ()
+
+        def gen_extref_str(ext_info: list) -> str:
+            ext_str = 'R'
+            for label in ext_info:
+                ext_str += '{:<6s}'.format(label)
+            return ext_str.strip()
+
+        def gen_extdef_str(ext_info: dict) -> str:
+            ext_str = 'D'
+            for label, value in ext_info.items():
+                ext_str += '{:<6s}{:06X}'.format(label, value)
+            return ext_str.strip()
+
+        def gen_modified_list(modified_info: list) -> list:
+            modified_list = []
+            for info in modified_info:
+                modified_str = 'M{:06X}{:02X}{:<7s}'.format(
+                    info['location'], info['byte'], info['offset'])
+                modified_list.append(modified_str.strip())
+            return modified_list
+
+        def gen_block_info(symbol_info: dict) -> dict:
+            block_info = {
+                'name': symbol_info['symbol'],
+                'length': 0,
+                'start': instr['location'],
+            }
+
+            extdef_info = self.__extdef_table[symbol_info['symbol']]
+            if extdef_info:
+                block_info['extdef'] = gen_extdef_str(extdef_info)
+            else:
+                block_info['extdef'] = ''
+
+            extref_info = self.__extref_table[symbol_info['symbol']]
+            if extref_info:
+                block_info['extref'] = gen_extref_str(extref_info)
+            else:
+                block_info['extref'] = ''
+
+            modified_info = self.__modified_record[symbol_info['symbol']]
+            if modified_info:
+                block_info['modified'] = gen_modified_list(modified_info)
+            else:
+                block_info['modified'] = []
+
+            return block_info
 
         for instr in self.instruction:
             if instr['mnemonic'] == 'START':
                 cur_opcode_list.clear()
                 cur_position_list.clear()
-                cur_block = {
-                    'name': instr['symbol'],
-                    'length': 0,
-                    'start': instr['location'],
-                }
+                cur_block = gen_block_info(instr)                
             elif instr['mnemonic'] == 'CSECT':
                 name = cur_block['name']
                 del cur_block['name']
                 program_info[name] = cur_block
+                
+                # merge this block opcode
                 program_info[name]['opcode'] = {}
                 for index, pos in enumerate(cur_position_list):
                     program_info[name]['opcode'][pos] = cur_opcode_list[index]
+                
+                # define new block info
                 cur_opcode_list.clear()
                 cur_position_list.clear()
-                cur_block = {
-                    'name': instr['symbol'],
-                    'length': 0,
-                    'start': instr['location'],
-                }
-                # print(json.dumps(program_info, indent = 4))
-            # elif instr['mnemonic'] == 'RSUB':
-                
+                cur_block = gen_block_info(instr)
             elif instr['mnemonic'] == 'END':
+                name = cur_block['name']
+                del cur_block['name']
+                program_info[name] = cur_block
+
+                # merge this block opcode
+                program_info[name]['opcode'] = {}
+                for index, pos in enumerate(cur_position_list):
+                    program_info[name]['opcode'][pos] = cur_opcode_list[index]
+
+                # END symbol will record start code position
                 for block in self.__symbol_table.keys():
                     if instr['operand'] in self.__symbol_table[block]:
-                        end_position = self.__symbol_table[block][instr['operand']]
+                        end_position = (block, self.__symbol_table[block][instr['operand']])
             elif 'location' in instr:
                 length = instr['location']
                 if 'opcode' in instr:
                     length += len(instr['opcode'])
                 cur_block['length'] = max(cur_block['length'], length)
-
             if 'opcode' in instr:
                 opcode_str = ''
                 for opc in instr['opcode']:
@@ -640,29 +668,42 @@ class Assembler:
                     cur_position_list.append(instr['location'])
                     cur_opcode_list.append(opcode_str)
 
-        name = cur_block['name']
-        del cur_block['name']
-        program_info[name] = cur_block
-        program_info[name]['opcode'] = {}
-        for index, pos in enumerate(cur_position_list):
-            program_info[name]['opcode'][pos] = cur_opcode_list[index]
-        
-        with open('./program_info.json', mode='a+') as f:
-            f.write(json.dumps(program_info, indent=4))
-
         with open(file_name, mode = 'w') as f:
-            for instr in self.instruction:
-                if instr['mnemonic'] == 'START':
-                    symbol = instr['symbol']
-                    f.write('H{:<6s}{:06X}{:06X}\n'.format(
-                        symbol,
-                        program_info[symbol]['start'],
-                        program_info[symbol]['length'],
-                    ))
-                elif instr['mnemonic'] == 'CSECT':
-                    pass
+            for symbol, info in program_info.items():
+                # header
+                f.write('H{:<6s}{:06X}{:06X}\n'.format(
+                    symbol, info['start'], info['length']
+                ))
 
-        return True
+                # external define
+                if info['extdef']:
+                    f.write(info['extdef'] + '\n')
+                
+                # external reference
+                if info['extref']:
+                    f.write(info['extref'] + '\n')
+                
+                # opcode
+                for offset, content in info['opcode'].items():
+                    f.write('T{:06X}{:02X}{}\n'.format(offset, len(content) // 2, content))
+
+                # modified record
+                for modified in info['modified']:
+                    f.write(modified + '\n')
+
+                # END record
+                if symbol == end_position[0]:
+                    f.write('E{:06X}\n'.format(end_position[1]))
+                else:
+                    f.write('E\n')
+                
+                f.write('\n')
+
+    def execute(self, read_file, write_file) -> None:
+        self.read_file(read_file)
+        self.pass_one()
+        self.pass_two()
+        self.write_file(write_file)
 
 OPTION_CONFIG = ['-o', '-a']
 
@@ -684,35 +725,13 @@ if __name__ == "__main__":
 
     opts, args = getopt(sorted_opt, 'a:o:')
     
+    read_file = args[0]
     # default set the output file is output.txt
-    file_name = 'output.txt'
+    write_file = 'output.txt'
     try:
-        file_name = [arg for opt, arg in opts if opt == '-o'][0]
+        write_file = [arg for opt, arg in opts if opt == '-o'][0]
     except:
-        file_name = 'output.txt'
-    
-    # read and parse file
-    if asm.read_file(args[0]):
-        # pass one
-        if asm.pass_one():
-            # pass two
-            if asm.pass_two():
-                with open('./program_info.json', mode='w+') as f:
-                    f.write(json.dumps(asm.instruction, indent=4))
-                    f.write('\n')
-                # for instr in asm.instruction:
-                #     print(json.dumps(instr, indent = 4))
-                # write file
-                if asm.write_file(file_name):
-                    print('assemble complete')
-                else:
-                    print('write file error')
-            else:
-                print('pass two error')
-        else:
-            print('pass one error')
-    else:
-        print('read file error')
+        write_file = 'output.txt'
 
-    # for instr in asm.instruction:
-    #     print(json.dumps(instr, indent = 4))
+    asm.execute(read_file, write_file)
+    
