@@ -3,16 +3,37 @@
 
 ## Feature
 
-- Addressing Mode
-- Direct Addressing Mode
-- Indirect Addressing Mode
-- Simple Addressing Mode
-- Immediate Addressing Mode
-    - Relative Addressing Mode
-    - Program Counter (PC Register)
-    - Base (Base Register)
-- Extended Instruction (4bit Instruction)
-- Literal
+- Instruction Formats & Addressing Mode
+	- Direct Addressing Mode
+	- Indirect Addressing Mode
+	- Simple Addressing Mode
+	- Immediate Addressing Mode
+		- Program Counter (PC Register)
+		- Base (Base Register)
+	- Extended Instruction (4bit Instruction)
+- Program Relocation
+	- Program Blocks
+	- Control Sections
+	- Program Linking
+		- Enternal
+		- Reference
+		- Modification Record
+- Others
+	- Literal
+
+## Algorithm
+
+- Pass One
+	- Record every program block information
+		- Symbols
+		- Literals
+		- External Define
+		- External Reference
+		- Modification Record
+	- Counting program address
+- Pass Two
+	- Instruction Format
+	- Generating Machine Code
 
 ## Operation Table For SIC/XE
 
@@ -86,61 +107,61 @@ COPY    START	0
 	    EXTREF  RDREC,WRREC
 FIRST   STL     RETADR		
 CLOOP  +JSUB	RDREC		
-	LDA	LENGTH		
-	COMP   #0		
-	JEQ	ENDFIL
+		LDA		LENGTH		
+		COMP   #0		
+		JEQ		ENDFIL
        +JSUB	WRREC		
-	J	CLOOP		
+		J		CLOOP		
 ENDFIL	LDA    =C'EOF'		
-	STA	BUFFER		
-	LDA    #3		
-	STA	LENGTH		
+		STA		BUFFER		
+		LDA    #3		
+		STA		LENGTH		
        +JSUB	WRREC		
-	J      @RETADR		
+		J      @RETADR		
 RETADR	RESW	1
 LENGTH	RESW	1
-	LTORG		
+		LTORG		
 BUFFER	RESB	4096
-BUFEND	EQU	*
-MAXLEN	EQU	BUFEND-BUFFER
+BUFEND	EQU		*
+MAXLEN	EQU		BUFEND-BUFFER
 
 RDREC	CSECT
-		.
-		.	SUBROUTTINE TO READ RECORD INTO BUFFER
-		.
-	EXTREF	BUFFER,LENGTH,BUFEND
-	CLEAR	X		
-	CLEAR	A		
-	CLEAR	S		
-	LDT	MAXLEN		
-RLOOP	TD	INPUT		
-	JEQ	RLOOP		
-	RD	INPUT		
-	COMPR	A,S		
-	JEQ	EXIT		
+.
+.		SUBROUTTINE TO READ RECORD INTO BUFFER
+.
+		EXTREF	BUFFER,LENGTH,BUFEND
+		CLEAR	X		
+		CLEAR	A		
+		CLEAR	S		
+		LDT		MAXLEN		
+RLOOP	TD		INPUT		
+		JEQ		RLOOP		
+		RD		INPUT		
+		COMPR	A,S		
+		JEQ		EXIT		
        +STCH	BUFFER,X	
-	TIXR	T		
-	JLT	RLOOP		
-EXIT   +STX	LENGTH		
-	RSUB			
+		TIXR	T		
+		JLT		RLOOP		
+EXIT   +STX		LENGTH		
+		RSUB			
 INPUT	BYTE	X'F1'		
 MAXLEN	WORD	BUFEND-BUFFER	
 
 WRREC	CSECT
-		.
-		.	SUBROUTINE TO WRITE RECORD FROM BUFFER
-		.
-	EXTREF	LENGTH,BUFFER
-	CLEAR	X		
-       +LDT	LENGTH		
+.
+.		SUBROUTINE TO WRITE RECORD FROM BUFFER
+.
+		EXTREF	LENGTH,BUFFER
+		CLEAR	X		
+       +LDT		LENGTH		
 WLOOP	TD     =X'05'		
-	JEQ	WLOOP		
-	+LDCH	BUFFER,X	
-	WD     =X'05'		
-	TIXR	T		
-	JLT	WLOOP		
-	RSUB			
-	END	FIRST
+		JEQ		WLOOP		
+	   +LDCH	BUFFER,X	
+		WD     =X'05'		
+		TIXR	T		
+		JLT		WLOOP		
+		RSUB			
+		END		FIRST
 ```
 
 ## Sample Output
